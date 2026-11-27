@@ -1,0 +1,18 @@
+[Unit]
+Description=MikroTik Zero-Touch Provisioning (Netinstall CLI Wrapper)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/ztp-netinstall
+ExecStart=/opt/ztp-netinstall/.venv/bin/python /opt/ztp-netinstall/autonetinstall.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=autonetinstall
+
+[Install]
+WantedBy=multi-user.target

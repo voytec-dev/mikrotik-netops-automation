@@ -1,0 +1,82 @@
+---
+- name: Bootstrap dedykowanego konta i klucza SSH dla Ansible na RouterOS v7
+  hosts: all
+  gather_facts: false
+
+  vars:
+    ansible_account_name: ansible
+    ansible_group_name: ansible
+    ansible_group_policy: "ssh,read,write,policy,test,sensitive,reboot"
+    ansible_mgmt_ip: "{{ lookup('env', 'ANSIBLE_MGMT_IP') }}"
+    ansible_pubkey_file_raw: "{{ lookup('env', 'ANSIBLE_PUBKEY_FILE') | default('ansible_mikrotik_ed25519.pub', true) }}"
+    ansible_pubkey_file: "{{ ansible_pubkey_file_raw if ansible_pubkey_file_raw.startswith('/') else (playbook_dir ~ '/../' ~ ansible_pubkey_file_raw) }}"
+    ansible_pubkey_content: "{{ lookup('file', ansible_pubkey_file) | trim }}"
+    ansible_random_password: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=24') }}"
+
+  tasks:
+    - name: Sprawdź wymagane zmienne przed połączeniem z routerami
+      ansible.builtin.assert:
+        that:
+          - ansible_mgmt_ip | length > 0
+          - ansible_pubkey_content | length > 0
+        fail_msg: >-
+          Ustaw ANSIBLE_MGMT_IP (np. 10.0.10.254/32) oraz ANSIBLE_PUBKEY_FILE
+          (ścieżka do klucza .pub) w .env lub przez -e.
+      run_once: true
+      delegate_to: localhost
+
+    - name: Sprawdź obecny stan grupy, użytkownika i kluczy SSH na routerze
+      community.routeros.command:
+        commands:
+          - /user/group/print terse where name={{ ansible_group_name }}
+          - /user/print terse where name={{ ansible_account_name }}
+          - /user/ssh-keys/print terse where user={{ ansible_account_name }}
+      register: ros_state
+
+    - name: Utwórz grupę {{ ansible_group_name }} (jeśli nie istnieje)
+      community.routeros.command:
+        commands:
+          - >-
+            /user/group/add name={{ ansible_group_name }}
+            policy={{ ansible_group_policy }}
+            comment="Dedicated Ansible automation group"
+      when: ansible_group_name not in ros_state.stdout[0]
+
+    - name: Utwórz użytkownika {{ ansible_account_name }} z ograniczeniem do IP zarządzania (jeśli nie istnieje)
+      community.routeros.command:
+        commands:
+          - >-
+            /user/add name={{ ansible_account_name }}
+            group={{ ansible_group_name }}
+            address={{ ansible_mgmt_ip }}
+            password="{{ ansible_random_password }}"
+            comment="Dedicated Ansible automation user"
+      when: ansible_account_name not in ros_state.stdout[1]
+
+    - name: Zapisz tymczasowy plik z kluczem publicznym i zaimportuj dla {{ ansible_account_name }}
+      community.routeros.command:
+        commands:
+          - /file/remove [find name="ansible_key.pub"]
+          - /file/add name="ansible_key.pub" contents="{{ ansible_pubkey_content }}"
+          - /user/ssh-keys/import public-key-file="ansible_key.pub" user={{ ansible_account_name }}
+          - /file/remove [find name="ansible_key.pub"]
+      register: ros_key_import
+      when: ansible_account_name not in ros_state.stdout[2]
+
+    - name: Zweryfikuj przypisany klucz SSH dla {{ ansible_account_name }}
+      community.routeros.command:
+        commands:
+          - /user/ssh-keys/print terse where user={{ ansible_account_name }}
+      register: ros_key_verify
+
+    - name: Upewnij się, że klucz SSH został przypisany do {{ ansible_account_name }}
+      ansible.builtin.assert:
+        that:
+          - ansible_account_name in ros_key_verify.stdout[0]
+        fail_msg: >-
+          Nie udało się zaimportować klucza SSH dla {{ ansible_account_name }}.
+          Odpowiedź routera: {{ ros_key_import.stdout | default([]) }}
+
+    - name: Pokaż potwierdzenie wdrożenia
+      ansible.builtin.debug:
+        msg: "{{ ros_key_verify.stdout_lines[0] }}"

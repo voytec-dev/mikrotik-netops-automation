@@ -1,0 +1,66 @@
+---
+username: oxidized
+model: routeros
+interval: 3600
+threads: 10
+timeout: 20
+retries: 3
+resolve_dns: false
+
+vars:
+  remove_secret: false
+  ssh_keys: ["/home/oxidized/.config/oxidized/oxidized_rsa"]
+
+input:
+  default: ssh
+  debug: false
+  ssh:
+    secure: false
+
+extensions:
+  oxidized-web:
+    load: true
+    listen: 0.0.0.0
+    port: 8888
+
+output:
+  default: git
+  git:
+    user: Oxidized
+    email: oxidized@netops.local
+    repo: "/home/oxidized/.config/oxidized/oxidized.git"
+
+# Wariant 1 (Rekomendowany): Dynamiczne źródło REST API NetBox (Source of Truth)
+source:
+  default: http
+  http:
+    url: http://netbox.local:8000/api/dcim/devices/?status=active&tag=oxidized&has_primary_ip=true
+    scheme: http
+    secure: false
+    pagination: true
+    pagination_key_name: next
+    hosts_location: results
+    headers:
+      # NetBox v4.5+ (API Token v2): użyj prefiksu "Bearer nbt_..."
+      # NetBox v3.x / v4.x (API Token v1): użyj prefiksu "Token ..."
+      Authorization: "Bearer nbt_YOUR_NETBOX_READONLY_TOKEN"
+      Accept: "application/json"
+    map:
+      name: name
+      ip: primary_ip4.address
+      model: platform.slug
+      group: tenant.name
+    model_map:
+      routeros: routeros
+      mikrotik-routeros: routeros
+
+# Wariant 2 (Awaryjny / Standalone): Statyczny inwentarz CSV (router.db)
+# source:
+#   default: csv
+#   csv:
+#     file: "/home/oxidized/.config/oxidized/router.db"
+#     delimiter: !ruby/regexp /:/
+#     map:
+#       name: 0
+#       ip: 1
+#       model: 2

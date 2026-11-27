@@ -1,0 +1,94 @@
+# ===============================
+# Minimalna konfiguracja Mikrotika z AutoProvisioning + DHCP WAN + Bridge LAN + Identity
+# ===============================
+
+# 1. Konfiguracja interfejsow
+/interface ethernet
+set [ find default-name=ether1 ] name=WAN1
+
+# 2. DHCP client na WAN1
+/ip dhcp-client
+add interface=WAN1 disabled=no
+
+# 3. Tworzenie bridge i dodawanie portow LAN
+ /interface bridge
+add name=bridge
+
+/interface bridge port
+add bridge=bridge interface=ether2
+add bridge=bridge interface=ether3
+add bridge=bridge interface=ether4
+add bridge=bridge interface=ether5
+
+# 4. Adresacja IP na bridge
+/ip address
+add address=192.168.99.1/24 interface=bridge
+
+# 5. Enable NAT dla LAN -> WAN
+/ip firewall nat
+add chain=srcnat out-interface=WAN1 action=masquerade
+
+# 6. DNS
+/ip dns
+set servers=8.8.8.8,8.8.4.4 allow-remote-requests=yes
+
+# 7. Wlaczenie SSH i Winbox (opcjonalnie)
+/ip service
+set ssh disabled=no
+set winbox disabled=no
+
+# 8. Ustawienie identity
+/system identity
+set name=ZTP_BASIC
+
+# 9. AutoProvisioning Script (zapisany w systemie)
+/system script
+add name=AutoProvisioning source="
+
+:local serial [/system routerboard get serial-number]
+:local cfgfile (\$serial . \".rsc\")
+:local url (\"https://provisioning.example.local/provision/\" . \$serial)
+
+:log info (\"[CONFIG] AutoProvisioning start dla urzadzenia o numerze seryjnym \" . \$serial)
+
+# --- Sprawdzenie, czy plik lokalny istnieje ---
+:if ([:len [/file find name=\$cfgfile]] > 0) do={
+    :log info (\"[CONFIG] Plik lokalny \" . \$cfgfile . \" istnieje, importuje z niego\")
+    :do {
+        /import file-name=\$cfgfile
+    } on-error={
+        :log warning (\"[CONFIG] Blad podczas importu pliku \" . \$cfgfile)
+        :error (\"[Import przerwany z powodu bledu w pliku \" . \$cfgfile)
+    }
+} else={
+    # Pobranie pliku z https://provisioning.example.local/provision/<serial>
+    :local fetched true
+    :do {
+        :log info (\"[CONFIG] Pobieram plik \" . \$cfgfile . \" z Provisioning API\")
+        /tool fetch url=\$url dst-path=\$cfgfile mode=https keep-result=yes
+    } on-error={ :set fetched false }
+
+    :if (\$fetched = false) do={
+        :log warning (\"[CONFIG] Nie udalo sie pobrac pliku \" . \$cfgfile . \" z Provisioning API, sprobuje ponownie za 1 minute\")
+        # Retry scheduler
+        :if ([:len [/system scheduler find name=\"AutoProvisioningSched\"]] = 0) do={
+            /system scheduler add name=\"AutoProvisioningSched\" start-time=startup interval=1m on-event=\"/system script run AutoProvisioning\"
+            :log info (\"[CONFIG] Scheduler retry utworzony: AutoProvisioningSched\")
+        }
+        :return
+    }
+}
+
+# --- Import konfiguracji ---
+:log info (\"[CONFIG] Importuje konfiguracje: \" . \$cfgfile)
+:do {
+    /import file-name=\$cfgfile
+} on-error={
+    :log warning (\"[CONFIG] Blad podczas importu pliku \" . \$cfgfile)
+    :error (\"[CONFIG] Import przerwany z powodu bledu w pliku \" . \$cfgfile)
+}
+"
+
+# --- Scheduler uruchamiajacy AutoProvisioning przy starcie co 1 minute ---
+/system scheduler
+add name=AutoProvisioningSched start-time=startup interval=0:1:0 on-event="/system script run AutoProvisioning"

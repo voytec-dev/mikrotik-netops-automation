@@ -1,0 +1,30 @@
+---
+plugin: netbox.netbox.nb_inventory
+# Adres API pobierany natywnie ze zmiennej środowiskowej NETBOX_API (z pliku .env)
+# Opcjonalnie możesz tu podać na sztywno: api_endpoint: http://netbox.local:8000
+
+# NetBox v4.5+ (Token v2, prefiks nbt_...):
+token:
+  type: Bearer
+  value: "{{ lookup('env', 'NETBOX_TOKEN') }}"
+
+# NetBox v3.x / v4.x (Token v1): użyj prostego stringa zamiast bloku type/value:
+# token: "{{ lookup('env', 'NETBOX_TOKEN') }}"
+
+validate_certs: true
+config_context: false
+
+# Pobieramy tylko aktywne routery RouterOS z przypisanym Primary IPv4 (pomija switche SwOS)
+device_query_filters:
+  - status: active
+  - platform: routeros
+  - has_primary_ip: "true"
+
+# Opcjonalne zawężenie do urządzeń z tagiem 'ansible' (np. przy stopniowym wdrażaniu):
+# - tag: ansible
+
+group_by:
+  - tenants
+  - sites
+  - device_roles
+  - tags

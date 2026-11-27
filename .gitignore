@@ -1,0 +1,33 @@
+# Sekrety i zmienne środowiskowe
+.env
+*.pem
+*_rsa
+*_ed25519
+*.pub
+*.key
+
+# Produkcyjne dane Oxidized i repozytorium kopii
+**/oxidized/config
+**/router.db
+**/oxidized.git/
+**/logs/
+**/pid
+
+# Binaria MikroTik Netinstall / RouterOS
+*.npk
+*.dpk
+netinstall-cli
+
+# Python / System
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+Thumbs.db
+
+# Ansible (lokalne inventory, zmienne i pliki robocze)
+*.retry
+**/inventory/netbox.yml
+**/inventory/hosts.yml
+**/group_vars/all.yml
+**/reports/

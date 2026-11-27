@@ -1,0 +1,3 @@
+core-router-01:10.0.10.1:routeros
+branch-site-a-r01:10.0.20.1:routeros
+branch-site-b-r01:10.0.30.1:routeros

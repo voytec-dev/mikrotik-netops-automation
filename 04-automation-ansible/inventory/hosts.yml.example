@@ -1,0 +1,8 @@
+---
+# Awaryjne statyczne inventory (gdy NetBox API jest niedostępne lub do testów pojedynczego hosta)
+all:
+  hosts:
+    branch-site-a-r01:
+      ansible_host: 10.0.10.1
+    branch-site-b-r01:
+      ansible_host: 10.0.10.2

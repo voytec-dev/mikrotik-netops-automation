@@ -1,0 +1,10 @@
+services:
+  oxidized:
+    image: oxidized/oxidized:latest
+    container_name: oxidized
+    restart: unless-stopped
+    # Dostęp do portu 8888 ograniczony na firewallu do sieci zarządzania i serwera NetBox (remove_secret: false)
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./oxidized:/home/oxidized/.config/oxidized

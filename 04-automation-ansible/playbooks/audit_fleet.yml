@@ -1,0 +1,77 @@
+---
+- name: Audyt Read-Only floty MikroTik RouterOS (wersje, firmware, zasoby, CSV)
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - name: Pobierz dane systemowe z routera (Read-Only)
+      community.routeros.command:
+        commands:
+          - /system/identity/print
+          - /system/resource/print
+          - /system/routerboard/print
+      register: ros_info
+      changed_when: false
+
+    - name: Wyciągnij kluczowe pola do raportu
+      ansible.builtin.set_fact:
+        audit_identity: "{{ (ros_info.stdout[0] | regex_search('name:\\s*([^\\r\\n]+)', '\\1') or [inventory_hostname])[0] | trim }}"
+        audit_ros_version: "{{ (ros_info.stdout[1] | regex_search('version:\\s*([^\\r\\n]+)', '\\1') or ['N/A'])[0] | trim }}"
+        audit_uptime: "{{ (ros_info.stdout[1] | regex_search('uptime:\\s*([^\\r\\n]+)', '\\1') or ['N/A'])[0] | trim }}"
+        audit_board: "{{ (ros_info.stdout[1] | regex_search('board-name:\\s*([^\\r\\n]+)', '\\1') or ['N/A'])[0] | trim }}"
+        audit_arch: "{{ (ros_info.stdout[1] | regex_search('architecture-name:\\s*([^\\r\\n]+)', '\\1') or ['N/A'])[0] | trim }}"
+        audit_free_hdd: "{{ (ros_info.stdout[1] | regex_search('free-hdd-space:\\s*([^\\r\\n]+)', '\\1') or ['N/A'])[0] | trim }}"
+        audit_model_rb: "{{ (ros_info.stdout[2] | regex_search('model:\\s*([^\\r\\n]+)', '\\1') or [''])[0] | trim }}"
+        audit_serial: "{{ (ros_info.stdout[2] | regex_search('serial-number:\\s*([^\\r\\n]+)', '\\1') or ['N/A'])[0] | trim }}"
+        audit_fw_current: "{{ (ros_info.stdout[2] | regex_search('current-firmware:\\s*([^\\r\\n]+)', '\\1') or ['N/A'])[0] | trim }}"
+        audit_fw_upgrade: "{{ (ros_info.stdout[2] | regex_search('upgrade-firmware:\\s*([^\\r\\n]+)', '\\1') or ['N/A'])[0] | trim }}"
+
+    - name: Ustal model końcowy i status firmware
+      ansible.builtin.set_fact:
+        audit_model: "{{ audit_model_rb if (audit_model_rb | length > 0) else audit_board }}"
+        audit_fw_mismatch: "{{ audit_fw_current != 'N/A' and audit_fw_upgrade != 'N/A' and audit_fw_current != audit_fw_upgrade }}"
+
+    - name: Podsumowanie urządzenia w konsoli
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} ({{ ansible_host }}) | {{ audit_model }} |
+          ROS: {{ audit_ros_version }} |
+          FW: {{ audit_fw_current }} -> {{ audit_fw_upgrade }}{{ ' [FW UPGRADE NEEDED]' if audit_fw_mismatch else '' }} |
+          Uptime: {{ audit_uptime }} | SN: {{ audit_serial }}
+
+    - name: Ustal ścieżkę pliku raportu CSV
+      ansible.builtin.set_fact:
+        audit_report_file: "{{ playbook_dir }}/../reports/fleet_audit_{{ lookup('pipe', 'date +%Y%m%d_%H%M') }}.csv"
+      run_once: true
+      delegate_to: localhost
+
+    - name: Utwórz katalog reports (jeśli nie istnieje)
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/../reports"
+        state: directory
+        mode: "0755"
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    - name: Zapisz zbiorczy raport CSV
+      ansible.builtin.copy:
+        dest: "{{ audit_report_file }}"
+        mode: "0644"
+        content: |
+          host,ip,status,model,arch,serial,ros_version,fw_current,fw_upgrade,fw_upgrade_needed,uptime,free_hdd
+          {% for h in ansible_play_hosts_all %}
+          {% if h in ansible_play_hosts %}
+          {{ h }},{{ hostvars[h].ansible_host | default('') }},OK,{{ hostvars[h].audit_model | default('N/A') }},{{ hostvars[h].audit_arch | default('N/A') }},{{ hostvars[h].audit_serial | default('N/A') }},{{ hostvars[h].audit_ros_version | default('N/A') }},{{ hostvars[h].audit_fw_current | default('N/A') }},{{ hostvars[h].audit_fw_upgrade | default('N/A') }},{{ hostvars[h].audit_fw_mismatch | default(false) }},{{ hostvars[h].audit_uptime | default('N/A') }},{{ hostvars[h].audit_free_hdd | default('N/A') }}
+          {% else %}
+          {{ h }},{{ hostvars[h].ansible_host | default('') }},UNREACHABLE,,,,,,,,,
+          {% endif %}
+          {% endfor %}
+      run_once: true
+      delegate_to: localhost
+
+    - name: Wypisz ścieżkę wygenerowanego raportu CSV
+      ansible.builtin.debug:
+        msg: "Raport CSV zapisany w: {{ audit_report_file }}"
+      run_once: true
+      delegate_to: localhost
